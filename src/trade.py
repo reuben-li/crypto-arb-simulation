@@ -26,13 +26,12 @@ binance.set(auth['bn']['key'], auth['bn']['secret'])
 
 def bf_trade(direction, size=SIZE):
     """Trade with bitflyer client"""
-    a = bf_client.sendchildorder(
+    bf_client.sendchildorder(
         product_code="BTC_JPY",
         child_order_type="MARKET",
         side=direction,
         size=size
     )
-    print(a)
     
 def qn_trade(direction, size=SIZE):
     """Trade with quoinex client"""
