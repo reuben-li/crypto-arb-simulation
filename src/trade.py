@@ -19,6 +19,7 @@ SIZE = 0.0001
 BITFLYER_FEES = 0.000
 WINDOW = 30
 
+# use existing clients / api wrappers
 qn_client = Quoinex(auth['qn']['key'], auth['qn']['secret'])
 bf_client = pybitflyer.API(api_key=auth['bf']['key'], api_secret=auth['bf']['secret'])
 binance.set(auth['bn']['key'], auth['bn']['secret'])
