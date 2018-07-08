@@ -16,7 +16,7 @@ auth = {}
 
 # this is not valid, usually mininum is 0.001
 SIZE = 0.0001 
-BITFLYER_FEES = 0.000
+BITFLYER_FEES = 0.0015
 WINDOW = 30
 
 # use existing clients / api wrappers
