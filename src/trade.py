@@ -18,7 +18,7 @@ JPY_MIN = 1000
 BTC_MIN = 0.001
 BF_FEES = 0.0016
 EXCHANGES = ['bb', 'zf']
-MARGIN = 0.0001
+MARGIN = {'low':0.00001, 'high' :0.0003}
 COLORS = ['blue', 'green', 'red', 'orange']
 
 ## import credentials
@@ -166,10 +166,15 @@ def trade_data(status):
     ask_e = ''
     bid_e = ''
     
+    # dynamic margins
+    margin = MARGIN['high']
+    if min(table['jpy'].values())/max(table['jpy'].values()) < 0.3 or min(table['btc'].values) < 0.004:
+        margin = MARGIN['low']
+    
     for e in EXCHANGES:
         ask, bid = globals()[e + '_price']()
         
-        if (max_bid - ask) / max_bid > MARGIN:
+        if (max_bid - ask) / max_bid > margin:
             if status[e]['buy'] and status[bid_e]['sell']:
                 globals()[e + '_trade']('BUY')
                 globals()[bid_e + '_trade']('SELL')
@@ -177,7 +182,7 @@ def trade_data(status):
                 action = 'traded'
             else:
                 action = 'no funds'
-        elif (bid - min_ask) / bid > MARGIN:
+        elif (bid - min_ask) / bid > margin:
             if status[ask_e]['buy'] and status[e]['sell']:
                 globals()[ask_e + '_trade']('BUY')
                 globals()[e + '_trade']('SELL')
@@ -186,8 +191,7 @@ def trade_data(status):
             else:
                 action = 'no funds'
         else:
-            action = 'no opportunity'
-            
+            action = 'no opportunity'            
         if ask < min_ask:
             min_ask = ask
             ask_e = e
