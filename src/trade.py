@@ -25,8 +25,8 @@ EXCHANGES = ['bb', 'zf']
 MARGIN = 0.0012
 LOW_MARGIN = 0.000
 # balance internally if better than cross exchange margins
-INTRA = 0.9999
-DEPTH_RANK = 1
+INTRA = 0.99999
+DEPTH_RANK = 0
 COLORS = ['blue', 'green', 'red', 'orange']
 
 ## import credentials
@@ -167,14 +167,20 @@ def balancer(status):
             ask, bid = globals()[e + '_price']()
             if bid/ask > INTRA:
                 globals()[e + '_trade']('SELL')
-                print("BALANCE - selling in " + e, bid/ask, bid)
+                # print("BALANCE - selling in " + e, bid/ask, bid)
+                logging.info(
+                    str(datetime.datetime.now()) + "BALANCE - selling in " + e + ": " + str(bid)
+                )
                 
     def btc_shortfall(e):
         if not status[e]['sell']:
             ask, bid = globals()[e + '_price']()
             if bid/ask > INTRA:
                 globals()[e + '_trade']('BUY')    
-                print("BALANCE - buying in " + e, bid/ask, ask)
+                # print("BALANCE - buying in " + e, bid/ask, ask)
+                logging.info(
+                    str(datetime.datetime.now()) + "BALANCE - buying in " + e + ": " + str(ask)
+                )
 
     orders = [gevent.spawn(yen_shortfall, e) for e in EXCHANGES]
     orders.extend([gevent.spawn(btc_shortfall, e) for e in EXCHANGES])
@@ -204,8 +210,8 @@ def trade_data(table, status):
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    datetime.datetime.now() + ' - buy ' + e + ' : ' + str(max_bid) + 
-                    ' sell '+ bid_e + ' : ' + str(ask)
+                    str(datetime.datetime.now()) + ' buy ' + e + ' : ' + str(ask) + 
+                    ' sell '+ bid_e + ' : ' + str(max_bid)
                 )
     
         # low funds accept low margin
@@ -216,13 +222,13 @@ def trade_data(table, status):
                     gevent.spawn(globals()[bid_e + '_trade'], 'SELL'),
                     gevent.spawn(print,
                                  'TRADE - buy:' + e + ' sell:'+ bid_e + ' margin: ' + 
-                                 str((max_bid - ask) / max_bid), max_bid, ask
+                                 str((max_bid - ask) / max_bid)
                                 )
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    datetime.datetime.now() + ' - buy ' + e + ' : ' + str(max_bid) + 
-                    ' sell '+ bid_e + ' : ' + str(ask)
+                    str(datetime.datetime.now()) + ' - buy ' + e + ' : ' + str(ask) + 
+                    ' sell '+ bid_e + ' : ' + str(max_bid)
                 )
         
         if (bid - min_ask) / bid > MARGIN:
@@ -232,13 +238,13 @@ def trade_data(table, status):
                     gevent.spawn(globals()[e + '_trade'], 'SELL'),
                     gevent.spawn(print,
                                  'TRADE - buy:' + ask_e + ' sell:'+ e + ' margin: ' +
-                                 str((bid - min_ask) / bid), bid, min_ask
+                                 str((bid - min_ask) / bid),
                                 )
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    datetime.datetime.now() + ' - buy ' + ask_e + ' : ' + str(bid) + 
-                    ' sell '+ e + ' : ' + str(min_ask)
+                    str(datetime.datetime.now()) + ' - buy ' + ask_e + ' : ' + str(min_ask) + 
+                    ' sell '+ e + ' : ' + str(bid)
                 )
 
                 
@@ -254,8 +260,8 @@ def trade_data(table, status):
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    datetime.datetime.now() + ' - buy ' + ask_e + ' : ' + str(bid) + 
-                    ' sell '+ e + ' : ' + str(min_ask)
+                    str(datetime.datetime.now()) + ' - buy ' + ask_e + ' : ' + str(min_ask) + 
+                    ' sell '+ e + ' : ' + str(bid)
                 )
         
         if ask < min_ask:
