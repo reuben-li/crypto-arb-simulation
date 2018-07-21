@@ -1,4 +1,3 @@
-%matplotlib tk
 import time
 import binance
 import pandas as pd
@@ -11,14 +10,17 @@ import python_bitbankcc
 import os
 import yaml
 from zaifapi import *
-from multiprocessing import Process
+from IPython.display import clear_output
 
-BTCJPY = 808865
+BTCJPY = 814865
 JPY_MIN = 1000
-BTC_MIN = 0.001
-BF_FEES = 0.0016
-EXCHANGES = ['bb', 'zf']
-MARGIN = {'low':0.00001, 'high' :0.0003}
+BTC_MIN = 0.0011
+BF_FEES = 0.0015
+SIZE = 0.001
+EXCHANGES = ['bb', 'zf', 'bf']
+MARGIN = 0.0015
+# balance internally if better than cross exchange margins
+INTRA = 0.99999
 COLORS = ['blue', 'green', 'red', 'orange']
 
 ## import credentials
@@ -26,16 +28,6 @@ with open("config.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
 
 auth = cfg['auth']
-
-# deposit fees
-# zf = 486 jpy
-# bb = free
-# gm = free
-
-# withdrawal transfer fees
-# zf = 0.0005 BTC / 350 jpy
-# bb = 0.001 BTC / 540 jpy
-# gm = free
 
 ## instantiate clients
 # qn_client = Quoinex(auth['qn']['key'], auth['qn']['secret'])
@@ -46,18 +38,17 @@ bb_client = python_bitbankcc.public()
 zf_pclient = ZaifTradeApi(auth['zf']['key'], auth['zf']['secret'])
 zf_client = ZaifPublicApi()
 
-def bf_trade(direction, size=0.001):
-    a = bf_client.sendchildorder(
+def bf_trade(direction, size=SIZE):
+    bf_client.sendchildorder(
         product_code="BTC_JPY",
         child_order_type="MARKET",
         side=direction,
         size=size
     )
-    print(a)
     
 def bf_price():
     res = bf_client.ticker(product_code="BTC_JPY")
-    return res['best_ask'], res['best_bid']
+    return float(res['best_ask']*(1 + BF_FEES)), float(res['best_bid']*(1 - BF_FEES))
 
 def bf_portfolio():
     for i in bf_client.getbalance():
@@ -67,7 +58,7 @@ def bf_portfolio():
             bf_btc = i['amount']
     return bf_jpy, bf_btc
     
-def qn_trade(direction, size=0.001):
+def qn_trade(direction, size=SIZE):
     if direction == 'BUY':
         qn_client.create_market_buy(
             product_id=5,
@@ -89,7 +80,7 @@ def qn_portfolio():
             qn_btc = float(i['balance'])
     return qn_jpy, qn_btc
         
-def bb_trade(direction, size=0.001):
+def bb_trade(direction, size=SIZE):
     bb_client_pte.order(
         'btc_jpy',
         '',
@@ -111,7 +102,7 @@ def bb_portfolio():
             bb_btc = float(a['onhand_amount'])
     return bb_jpy, bb_btc
 
-def zf_trade(direction, size=0.001):
+def zf_trade(direction, size=SIZE):
     ask, bid = zf_price()
     if direction == 'BUY':
         action = 'bid'
@@ -155,9 +146,31 @@ def portfolio_value():
     table['btc']['_total'] = sum(table['btc'].values())
     table['total_value'] = (table['btc']['_total'] * BTCJPY) + table['jpy']['_total']
     return table, status
-    
-def trade_data(status):
-    action = ''
+
+def estimated(table, buying, selling, bprice, sprice):
+    table['jpy'][buying] -= bprice
+    table['btc'][buying] += SIZE
+    table['jpy'][selling] += sprice
+    table['btc'][selling] -= SIZE
+    return table
+
+def balancer(table, status):
+    for e in EXCHANGES:
+        if not status[e]['buy']:
+            ask, bid = globals()[e + '_price']()
+            if bid/ask > INTRA:
+                globals()[e + '_trade']('SELL')
+                print("BALANCE - selling in " + e, bid/ask)
+                
+        if not status[e]['sell']:
+            ask, bid = globals()[e + '_price']()
+            if bid/ask > INTRA:
+                globals()[e + '_trade']('BUY')    
+                print("BALANCE - buying in " + e, bid/ask)
+
+    return table
+               
+def trade_data(table, status):
     data = {}
     min_ask = 2000000
     max_bid = 1
@@ -165,33 +178,20 @@ def trade_data(status):
     # best ask and bid exchanges
     ask_e = ''
     bid_e = ''
-    
-    # dynamic margins
-    margin = MARGIN['high']
-    if min(table['jpy'].values())/max(table['jpy'].values()) < 0.3 or min(table['btc'].values) < 0.004:
-        margin = MARGIN['low']
-    
+        
     for e in EXCHANGES:
         ask, bid = globals()[e + '_price']()
         
-        if (max_bid - ask) / max_bid > margin:
+        if (max_bid - ask) / max_bid > MARGIN:
             if status[e]['buy'] and status[bid_e]['sell']:
                 globals()[e + '_trade']('BUY')
                 globals()[bid_e + '_trade']('SELL')
-                print('opp! buy:' + e + ' sell: '+ bid_e + ' margin: '  + str(margin))
-                action = 'traded'
-            else:
-                action = 'no funds'
-        elif (bid - min_ask) / bid > margin:
+                print('TRADE - buy:' + e + ' sell:'+ bid_e + ' margin: '  + str((max_bid - ask) / max_bid))
+        elif (bid - min_ask) / bid > MARGIN:
             if status[ask_e]['buy'] and status[e]['sell']:
                 globals()[ask_e + '_trade']('BUY')
                 globals()[e + '_trade']('SELL')
-                print('opp! buy:' + ask_e + ' sell:'+ e + ' margin: '  + str(margin))
-                action = 'traded'
-            else:
-                action = 'no funds'
-        else:
-            action = 'no opportunity'            
+                print('TRADE - buy:' + ask_e + ' sell:'+ e + ' margin: '  + str((bid - min_ask) / bid))
         if ask < min_ask:
             min_ask = ask
             ask_e = e
@@ -202,8 +202,9 @@ def trade_data(status):
         data[e + '_ask'] = ask
         data[e + '_bid'] = bid
 
-    return data, action
+    return data
 
+%matplotlib tk
 d = []
 
 fig = plt.figure()
@@ -213,20 +214,44 @@ print("START!")
 print("-------------")
 
 i = 0
-last_action = ''
+with open('last_table.json') as data_file:    
+    old_table = json.load(data_file)
+    start = time.time()
+
 while True:
     i += 1
-    table, status = portfolio_value()    
-    data, action = trade_data(status)
-    
-    if action == 'traded' or action != last_action:
-        print(action)
+    table, status = portfolio_value()
+        
+    if i % 10 == 0 or i == 2:
+        clear_output(wait=True)
+        print('-------')
+        print('PORTFOLIO')
+        print('-------')
         pprint(table)
+        print('-------')
+        print('GROWTH')
+        print('-------')
+        jpy_net = (table['jpy']['_total'] - old_table['jpy']['_total']) / old_table['jpy']['_total']
+        btc_net = (table['btc']['_total'] - old_table['btc']['_total']) / old_table['btc']['_total']
+        print("jpy growth(%)", round(jpy_net * 100,3))
+        print("btc growth(%)", round(btc_net * 100,3))
+        print("net growth(%)", round((jpy_net + btc_net) * 100,3))
+        print('-------')
+        print('STATUS')
+        print('-------')
         pprint(status)
-        print("-------------")
+        print('-------')
+        print('ELAPSED TIME (mins)')
+        print('-------')
+        print(round((time.time() - start)/60, 1))
+        
     
-    last_action = action
-
+        with open('last_table.json', 'w') as outfile:
+            json.dump(table, outfile)
+    
+    balanced = balancer(table, status)
+    data = trade_data(table, status)
+    
     d.append(data)
     if i > 30:
         d.pop(0)
@@ -245,4 +270,4 @@ while True:
     
     fig.canvas.draw()
     fig.canvas.flush_events()
-    time.sleep(2)
+    time.sleep(1.5)
