@@ -27,7 +27,7 @@ MIN_MARGIN = -(MARGIN * 0.8)
 LOW_RATIO = 2
 DEPTH_RANK = 0
 COLORS = ['blue', 'green', 'red', 'orange']
-BTC_REF = 830000  #to filter out market fluctuation
+BTC_REF = 830000  # to filter out market fluctuation
 
 # import credentials
 with open('config.yml', 'r') as ymlfile:
@@ -195,10 +195,10 @@ def trade_data(table, status):
 
 
 def main():
-    d = []
-    plt.ion()
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+    #d = []
+    #plt.ion()
+    #fig = plt.figure()
+    #ax = fig.add_subplot(111)
     old_total = 0
     print('------------\nSTART!\n-----------')
 
@@ -213,9 +213,9 @@ def main():
         data, current_margin = trade_data(table, status)
 
         if i % 5 == 0 or i == 2:
-            total_value = table['btc']['_total'] * \
-                    BTC_REF + \
-                    table['jpy']['_total']
+            total_value = (table['btc']['_total'] *
+                           BTC_REF) + \
+                           table['jpy']['_total']
             table['total_value'] = total_value
             total_diff = total_value - old_total
             old_total = total_value
@@ -260,25 +260,31 @@ def main():
             with open('last_table.json', 'w') as outfile:
                 json.dump(table, outfile)
 
-        d.append(data)
-        if i > 30:
-            d.pop(0)
-        df = pd.DataFrame(data=d)
-        rows = -30
-        ax.clear()
-        e_color = 0
+        #d.append(data)
+        #if i > 30:
+        #    d.pop(0)
+        #df = pd.DataFrame(data=d)
+        #rows = -30
+        #ax.clear()
+        #e_color = 0
 
-        for e in EXCHANGES:
-            ax.plot(df.index[rows:], df[e+'_ask'][rows:],
-                    label=e+'_ask', color=COLORS[e_color])
-            ax.plot(df.index[rows:], df[e+'_bid'][rows:],
-                    label=e+'_bid', linestyle='dashed', color=COLORS[e_color])
-            e_color += 1
-        ax.legend()
-        fig.canvas.draw()
-        fig.canvas.flush_events()
+        #for e in EXCHANGES:
+        #    ax.plot(df.index[rows:], df[e+'_ask'][rows:],
+        #            label=e+'_ask', color=COLORS[e_color])
+        #    ax.plot(df.index[rows:], df[e+'_bid'][rows:],
+        #            label=e+'_bid', linestyle='dashed', color=COLORS[e_color])
+        #    e_color += 1
+        #ax.legend()
+        #fig.canvas.draw()
+        #fig.canvas.flush_events()
         time.sleep(1.5)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        quit()
+    except Exception as e:
+        sleep(10)
+        main()
