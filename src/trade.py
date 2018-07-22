@@ -198,6 +198,7 @@ def main():
     plt.ion()
     fig = plt.figure()
     ax = fig.add_subplot(111)
+    old_total = 0
     print('------------\nSTART!\n-----------')
 
     i = 0
@@ -211,12 +212,19 @@ def main():
         data, current_margin = trade_data(table, status)
 
         if i % 5 == 0 or i == 2:
+            total_value = (sum(table['btc'].values()) *
+                           sum(data.values())/len(data)) + \
+                           sum(table['jpy'].values())
+            total_diff = total_value - old_total
+            old_total = total_value
             clear_output(wait=True)
             os.system('cls||clear')
             print('-------')
             print('PORTFOLIO')
             print('-------')
             pprint(table)
+            print('TOTAL value: ', total_value)
+            print('(delta 5 steps): ', total_diff)
             print('-------')
             print('GROWTH')
             print('-------')
