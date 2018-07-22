@@ -17,7 +17,6 @@ logging.basicConfig(filename='trade.log', level=logging.INFO)
 
 # globals
 EXCHANGES = ['bb', 'zf']
-BTCJPY = 814865
 JPY_MIN = 1000
 BTC_MIN = 0.0011
 BF_FEES = 0.0015
@@ -30,7 +29,7 @@ DEPTH_RANK = 0
 COLORS = ['blue', 'green', 'red', 'orange']
 
 # import credentials
-with open("config.yml", 'r') as ymlfile:
+with open('config.yml', 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
 auth = cfg['auth']
 
@@ -73,7 +72,7 @@ def bb_price():
 
 
 def bf_price():
-    res = bf_client.ticker(product_code="BTC_JPY")
+    res = bf_client.ticker(product_code='BTC_JPY')
     return float(res['best_ask']*(1 + BF_FEES)), \
         float(res['best_bid']*(1 - BF_FEES))
 
@@ -132,8 +131,6 @@ def portfolio_value():
 
     table['jpy']['_total'] = sum(table['jpy'].values())
     table['btc']['_total'] = sum(table['btc'].values())
-    table['total_value'] = (table['btc']['_total'] * BTCJPY) + \
-        table['jpy']['_total']
     return table, status
 
 
@@ -169,7 +166,7 @@ def trade_data(table, status):
         margin_b = (bid - min_ask) / bid
 
         if margin_a > MARGIN:
-            if status[e]["buy"] > 0 and status[bid_e]['sell'] > 0:
+            if status[e]['buy'] > 0 and status[bid_e]['sell'] > 0:
                 simul_orders(e, bid_e, ask, max_bid, 2)
         elif margin_a > LOW_MARGIN:
             if status[e]['sell'] < 2 or status[bid_e]['buy'] < 2:
@@ -227,9 +224,9 @@ def main():
                        old_table['jpy']['_total']) / old_table['jpy']['_total']
             btc_net = (table['btc']['_total'] -
                        old_table['btc']['_total']) / old_table['btc']['_total']
-            print("jpy growth(%)", round(jpy_net * 100, 3))
-            print("btc growth(%)", round(btc_net * 100, 3))
-            print("net growth(%)", round((jpy_net + btc_net) * 100, 3))
+            print('jpy growth(%)', round(jpy_net * 100, 3))
+            print('btc growth(%)', round(btc_net * 100, 3))
+            print('net growth(%)', round((jpy_net + btc_net) * 100, 3))
             print('-------')
             print('STATUS')
             print('-------')
