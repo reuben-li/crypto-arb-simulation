@@ -22,8 +22,11 @@ BTC_MIN = 0.0011
 BF_FEES = 0.0015
 SIZE = 0.001
 EXCHANGES = ['bb', 'zf']
-MARGIN = 0.0012
+MARGIN = 0.005
 LOW_MARGIN = 0.000
+MIN_MARGIN = -(MARGIN * 0.8)
+# how many trades to non-trading situation before we use low margins
+LOW_RATIO = 3
 # balance internally if better than cross exchange margins
 INTRA = 0.99999
 DEPTH_RANK = 0
@@ -137,15 +140,24 @@ def portfolio_value():
     table = {}
     table['jpy'] = {}
     table['btc'] = {}
+    
+    #status: 0 = no trading, 1 = low funds, 2 = normal
     status = {}
     
     for e in EXCHANGES:
-        status[e] = {'buy':True, 'sell':True}
+        status[e] = {'buy':2, 'sell':2}
         jpy, btc = globals()[e + '_portfolio']()
+        
         if jpy < JPY_MIN:
-            status[e]['buy'] = False
-        elif btc < BTC_MIN:
-            status[e]['sell'] = False
+            status[e]['buy'] = 0
+        elif jpy < JPY_MIN * LOW_RATIO:
+            status[e]['buy'] = 1
+        
+        if btc < BTC_MIN:
+            status[e]['sell'] = 0
+        elif btc < BTC_MIN * LOW_RATIO:
+            status[e]['sell'] = 1
+        
         table['jpy'][e] = jpy
         table['btc'][e] = btc
     
@@ -163,23 +175,21 @@ def estimated(table, buying, selling, bprice, sprice):
 
 def balancer(status):
     def yen_shortfall(e):
-        if not status[e]['buy']:
+        if status[e]['buy'] == 0:
             ask, bid = globals()[e + '_price']()
             if bid/ask > INTRA:
                 globals()[e + '_trade']('SELL')
-                # print("BALANCE - selling in " + e, bid/ask, bid)
                 logging.info(
-                    str(datetime.datetime.now()) + "BALANCE - selling in " + e + ": " + str(bid)
+                    str(datetime.datetime.now()) + " BALANCE - selling in " + e + ": " + str(bid)
                 )
                 
     def btc_shortfall(e):
-        if not status[e]['sell']:
+        if status[e]['sell'] == 0:
             ask, bid = globals()[e + '_price']()
             if bid/ask > INTRA:
                 globals()[e + '_trade']('BUY')    
-                # print("BALANCE - buying in " + e, bid/ask, ask)
                 logging.info(
-                    str(datetime.datetime.now()) + "BALANCE - buying in " + e + ": " + str(ask)
+                    str(datetime.datetime.now()) + " BALANCE - buying in " + e + ": " + str(ask)
                 )
 
     orders = [gevent.spawn(yen_shortfall, e) for e in EXCHANGES]
@@ -198,70 +208,81 @@ def trade_data(table, status):
 
     for e in EXCHANGES:
         ask, bid = globals()[e + '_price']()
+        
+        ### normal trade 
         if (max_bid - ask) / max_bid > MARGIN:
-            if status[e]["buy"] and status[bid_e]['sell']:
+            if status[e]["buy"] > 0 and status[bid_e]['sell'] > 0:
                 orders = [
                     gevent.spawn(globals()[e + '_trade'], 'BUY'),
-                    gevent.spawn(globals()[bid_e + '_trade'], 'SELL'),
-                    gevent.spawn(print,
-                                 'TRADE - buy:' + e + ' sell:'+ bid_e + ' margin: ' + 
-                                 str((max_bid - ask) / max_bid)
-                                )
+                    gevent.spawn(globals()[bid_e + '_trade'], 'SELL')
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    str(datetime.datetime.now()) + ' buy ' + e + ' : ' + str(ask) + 
-                    ' sell '+ bid_e + ' : ' + str(max_bid)
+                    str(datetime.datetime.now()) + ' buy(2) ' + e + ':' + str(ask) + 
+                    ' sell '+ bid_e + ':' + str(max_bid)
                 )
     
         # low funds accept low margin
         elif (max_bid - ask) / max_bid > LOW_MARGIN:
-            if not status[e]['sell'] or not status[bid_e]['buy']:
+            if status[e]['sell'] < 2 or status[bid_e]['buy'] < 2:
                 orders = [
                     gevent.spawn(globals()[e + '_trade'], 'BUY'),
-                    gevent.spawn(globals()[bid_e + '_trade'], 'SELL'),
-                    gevent.spawn(print,
-                                 'TRADE - buy:' + e + ' sell:'+ bid_e + ' margin: ' + 
-                                 str((max_bid - ask) / max_bid)
-                                )
+                    gevent.spawn(globals()[bid_e + '_trade'], 'SELL')
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    str(datetime.datetime.now()) + ' - buy ' + e + ' : ' + str(ask) + 
-                    ' sell '+ bid_e + ' : ' + str(max_bid)
+                    str(datetime.datetime.now()) + ' - buy(1) ' + e + ':' + str(ask) + 
+                    ' sell '+ bid_e + ':' + str(max_bid)
+                )
+        
+        # no funds take hit
+        elif (max_bid - ask) / max_bid > MIN_MARGIN:
+            if status[e]['sell'] == 0 or status[bid_e]['buy'] == 0:
+                orders = [
+                    gevent.spawn(globals()[e + '_trade'], 'BUY'),
+                    gevent.spawn(globals()[bid_e + '_trade'], 'SELL')
+                ]
+                gevent.joinall(orders)
+                logging.info(
+                    str(datetime.datetime.now()) + ' - buy(0) ' + e + ':' + str(ask) + 
+                    ' sell '+ bid_e + ':' + str(max_bid)
                 )
         
         if (bid - min_ask) / bid > MARGIN:
-            if status[ask_e]['buy'] and status[e]['sell']:
+            if status[ask_e]['buy'] > 0 and status[e]['sell'] > 0:
                 orders = [
                     gevent.spawn(globals()[ask_e + '_trade'], 'BUY'),
-                    gevent.spawn(globals()[e + '_trade'], 'SELL'),
-                    gevent.spawn(print,
-                                 'TRADE - buy:' + ask_e + ' sell:'+ e + ' margin: ' +
-                                 str((bid - min_ask) / bid),
-                                )
+                    gevent.spawn(globals()[e + '_trade'], 'SELL')
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    str(datetime.datetime.now()) + ' - buy ' + ask_e + ' : ' + str(min_ask) + 
-                    ' sell '+ e + ' : ' + str(bid)
+                    str(datetime.datetime.now()) + ' - buy(2) ' + ask_e + ':' + str(min_ask) + 
+                    ' sell '+ e + ':' + str(bid)
                 )
 
                 
         elif (bid - min_ask) / bid > LOW_MARGIN:
-            if not status[ask_e]['sell'] or not status[e]['buy']:
+            if status[ask_e]['sell'] < 2 or status[e]['buy'] < 2:
                 orders = [
                     gevent.spawn(globals()[ask_e + '_trade'], 'BUY'),
-                    gevent.spawn(globals()[e + '_trade'], 'SELL'),
-                    gevent.spawn(print,
-                                 'TRADE - buy:' + ask_e + ' sell:'+ e + ' margin: ' +
-                                 str((bid - min_ask) / bid), bid, min_ask
-                                )
+                    gevent.spawn(globals()[e + '_trade'], 'SELL')
                 ]
                 gevent.joinall(orders)
                 logging.info(
-                    str(datetime.datetime.now()) + ' - buy ' + ask_e + ' : ' + str(min_ask) + 
-                    ' sell '+ e + ' : ' + str(bid)
+                    str(datetime.datetime.now()) + ' - buy(1) ' + ask_e + ':' + str(min_ask) + 
+                    ' sell '+ e + ':' + str(bid)
+                )
+        
+        elif (bid - min_ask) / bid > MIN_MARGIN:
+            if status[ask_e]['sell'] == 0 or status[e]['buy'] == 0:
+                orders = [
+                    gevent.spawn(globals()[ask_e + '_trade'], 'BUY'),
+                    gevent.spawn(globals()[e + '_trade'], 'SELL')
+                ]
+                gevent.joinall(orders)
+                logging.info(
+                    str(datetime.datetime.now()) + ' - buy(0) ' + ask_e + ':' + str(min_ask) + 
+                    ' sell '+ e + ':' + str(bid)
                 )
         
         if ask < min_ask:
@@ -273,7 +294,7 @@ def trade_data(table, status):
 
         data[e + '_ask'] = ask
         data[e + '_bid'] = bid
-    return data
+    return data, (max_bid - min_ask) / max_bid
 
 def main():
     %matplotlib tk
@@ -293,8 +314,10 @@ def main():
     while True:
         i += 1
         table, status = portfolio_value()
-
-        if i % 10 == 0 or i == 2:
+        #balancer(status)
+        data, current_margin = trade_data(table, status)
+        
+        if i % 5 == 0 or i == 2:
             clear_output(wait=True)
             print('-------')
             print('PORTFOLIO')
@@ -312,6 +335,7 @@ def main():
             print('STATUS')
             print('-------')
             pprint(status)
+            print('current margin: ', round(current_margin, 5))
             print('-------')
             print('ELAPSED TIME (mins)')
             print('-------')
@@ -319,9 +343,6 @@ def main():
 
             with open('last_table.json', 'w') as outfile:
                 json.dump(table, outfile)
-
-        balancer(status)
-        data = trade_data(table, status)
 
         d.append(data)
         if i > 30:
