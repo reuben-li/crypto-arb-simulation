@@ -18,15 +18,16 @@ logging.basicConfig(filename='trade.log', level=logging.INFO)
 # globals
 EXCHANGES = ['bb', 'zf']
 JPY_MIN = 1000
-BTC_MIN = 0.0011
+BTC_MIN = 0.0021
 BF_FEES = 0.0015
 SIZE = 0.001
-MARGIN = 0.0004
+MARGIN = 0.0006
 LOW_MARGIN = 0.000
 MIN_MARGIN = -(MARGIN * 0.8)
-LOW_RATIO = 3
+LOW_RATIO = 2
 DEPTH_RANK = 0
 COLORS = ['blue', 'green', 'red', 'orange']
+BTC_REF = 830000  #to filter out market fluctuation
 
 # import credentials
 with open('config.yml', 'r') as ymlfile:
@@ -212,9 +213,10 @@ def main():
         data, current_margin = trade_data(table, status)
 
         if i % 5 == 0 or i == 2:
-            total_value = (sum(table['btc'].values()) *
-                           sum(data.values())/len(data)) + \
-                           sum(table['jpy'].values())
+            total_value = table['btc']['_total'] * \
+                    BTC_REF + \
+                    table['jpy']['_total']
+            table['total_value'] = total_value
             total_diff = total_value - old_total
             old_total = total_value
             clear_output(wait=True)
@@ -228,13 +230,23 @@ def main():
             print('-------')
             print('GROWTH')
             print('-------')
-            jpy_net = (table['jpy']['_total'] -
-                       old_table['jpy']['_total']) / old_table['jpy']['_total']
-            btc_net = (table['btc']['_total'] -
-                       old_table['btc']['_total']) / old_table['btc']['_total']
+            new_jpy = table['jpy']['_total']
+            old_jpy = old_table['jpy']['_total']
+            jpy_net = (new_jpy - old_jpy) / old_jpy
+
+            new_btc = table['btc']['_total']
+            old_btc = old_table['btc']['_total']
+            btc_net = (new_btc - old_btc) / old_btc
+
+            new_total = table['total_value']
+            old_total = old_table['total_value']
+            growth = new_total - old_total
+            growth_per = growth / old_total
+
             print('jpy growth(%)', round(jpy_net * 100, 3))
             print('btc growth(%)', round(btc_net * 100, 3))
-            print('net growth(%)', round((jpy_net + btc_net) * 100, 3))
+            print('net growth(%)', round(growth_per * 100, 3))
+            print('net growth(JPY)', round(growth, 3))
             print('-------')
             print('STATUS')
             print('-------')
