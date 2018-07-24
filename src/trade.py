@@ -1,7 +1,7 @@
 from zaifapi import *
 from pprint import pprint
 import time
-import pandas as pd
+# import pandas as pd
 import json
 import pybitflyer
 import python_bitbankcc
@@ -24,7 +24,6 @@ LOW_MARGIN = 0.000
 MIN_MARGIN = -(MARGIN * 0.6)
 LOW_RATIO = 4 # when are funds considered low
 STABLE_VOL = 0.05 # when is volume considered stable
-DEPTH_RANK = 0
 COLORS = ['blue', 'green', 'red', 'orange']
 BTC_REF = 905000  # to filter out market fluctuation
 
@@ -44,22 +43,21 @@ zf_pclient = ZaifTradeApi(
 zf_client = ZaifPublicApi()
 
 
-def bb_trade(direction, size=SIZE):
+def bb_trade(direction, price, size=SIZE):
     bb_client_pte.order(
         'btc_jpy', '', size, direction.lower(), 'market'
     )
 
 
-def bf_trade(direction, size=SIZE):
+def bf_trade(direction, price, size=SIZE):
     bf_client.sendchildorder(
         product_code='BTC_JPY', child_order_type='MARKET',
         side=direction, size=size
     )
 
 
-def zf_trade(direction, size=SIZE):
-    ask, bid = zf_price()
-    action, price = ('bid', ask) if direction == 'BUY' else ('ask', bid)
+def zf_trade(direction, price, size=SIZE):
+    action = 'bid' if direction == 'BUY' else 'ask'
     zf_pclient.trade(
         currency_pair='btc_jpy', action=action,
         amount=size, price=price
@@ -163,8 +161,8 @@ def trade_data(table, status):
 
     def simul_orders(bx, sx, bprice, sprice, level):
         orders = [
-            gevent.spawn(globals()[bx + '_trade'], 'BUY'),
-            gevent.spawn(globals()[sx + '_trade'], 'SELL')
+            gevent.spawn(globals()[bx + '_trade'], bprice, 'BUY'),
+            gevent.spawn(globals()[sx + '_trade'], sprice, 'SELL')
         ]
         gevent.joinall(orders)
         logging.info(
@@ -235,8 +233,6 @@ def main():
             print('PORTFOLIO')
             print('-------')
             pprint(table)
-            print('TOTAL value: ', total_value)
-            print('(delta 5 steps): ', total_diff)
             print('-------')
             print('GROWTH')
             print('-------')
