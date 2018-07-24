@@ -1,9 +1,7 @@
 from zaifapi import *
-from IPython.display import clear_output
 from pprint import pprint
 import time
 import pandas as pd
-import matplotlib.pyplot as plt
 import json
 import pybitflyer
 import python_bitbankcc
@@ -21,13 +19,14 @@ JPY_MIN = 1000
 BTC_MIN = 0.0021
 BF_FEES = 0.0015
 SIZE = 0.001
-MARGIN = 0.0006
+MARGIN = 0.0007
 LOW_MARGIN = 0.000
-MIN_MARGIN = -(MARGIN * 0.8)
-LOW_RATIO = 2
+MIN_MARGIN = -(MARGIN * 0.6)
+LOW_RATIO = 4 # when are funds considered low
+STABLE_VOL = 0.05 # when is volume considered stable
 DEPTH_RANK = 0
 COLORS = ['blue', 'green', 'red', 'orange']
-BTC_REF = 830000  # to filter out market fluctuation
+BTC_REF = 905000  # to filter out market fluctuation
 
 # import credentials
 with open('config.yml', 'r') as ymlfile:
@@ -69,7 +68,13 @@ def zf_trade(direction, size=SIZE):
 
 def bb_price():
     res = bb_client.get_depth('btc_jpy')
-    return int(res['asks'][0][0]), int(res['bids'][0][0])
+    for ask, askv in res['asks']:
+        if float(askv) > STABLE_VOL:
+            break
+    for bid, bidv in res['bids']:
+        if float(bidv) > STABLE_VOL:
+            break
+    return int(ask), int(bid)
 
 
 def bf_price():
@@ -80,7 +85,13 @@ def bf_price():
 
 def zf_price():
     res = zf_client.depth('btc_jpy')
-    return int(res['asks'][DEPTH_RANK][0]), int(res['bids'][DEPTH_RANK][0])
+    for ask, askv in res['asks']:
+        if float(askv) > STABLE_VOL:
+            break
+    for bid, bidv in res['bids']:
+        if float(bidv) > STABLE_VOL:
+            break
+    return int(ask), int(bid)
 
 
 def bb_portfolio():
@@ -219,7 +230,6 @@ def main():
             table['total_value'] = total_value
             total_diff = total_value - old_total
             old_total = total_value
-            clear_output(wait=True)
             os.system('cls||clear')
             print('-------')
             print('PORTFOLIO')
@@ -284,7 +294,8 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+        print('exiting')
         quit()
     except Exception as e:
-        sleep(10)
+        time.sleep(10)
         main()
