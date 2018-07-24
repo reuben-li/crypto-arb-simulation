@@ -1,7 +1,7 @@
 from zaifapi import *
 from pprint import pprint
 import time
-# import pandas as pd
+import pandas as pd
 import json
 import pybitflyer
 import python_bitbankcc
@@ -14,6 +14,7 @@ import os
 logging.basicConfig(filename='trade.log', level=logging.INFO)
 
 # globals
+PLOT = False
 EXCHANGES = ['bb', 'zf']
 JPY_MIN = 1000
 BTC_MIN = 0.0021
@@ -144,14 +145,6 @@ def portfolio_value():
     return table, status
 
 
-def estimated(table, buying, selling, bprice, sprice):
-    table['jpy'][buying] -= bprice
-    table['btc'][buying] += SIZE
-    table['jpy'][selling] += sprice
-    table['btc'][selling] -= SIZE
-    return table
-
-
 def trade_data(table, status):
     data = {}
     min_ask = 2000000
@@ -161,8 +154,8 @@ def trade_data(table, status):
 
     def simul_orders(bx, sx, bprice, sprice, level):
         orders = [
-            gevent.spawn(globals()[bx + '_trade'], bprice, 'BUY'),
-            gevent.spawn(globals()[sx + '_trade'], sprice, 'SELL')
+            gevent.spawn(globals()[bx + '_trade'], 'BUY', bprice),
+            gevent.spawn(globals()[sx + '_trade'], 'SELL', sprice)
         ]
         gevent.joinall(orders)
         logging.info(
@@ -203,11 +196,12 @@ def trade_data(table, status):
     return data, (max_bid - min_ask) / max_bid
 
 
-def main():
-    #d = []
-    #plt.ion()
-    #fig = plt.figure()
-    #ax = fig.add_subplot(111)
+def main(plot):
+    if plot:
+        d = []
+        plt.ion()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
     old_total = 0
     print('------------\nSTART!\n-----------')
 
@@ -221,7 +215,7 @@ def main():
         table, status = portfolio_value()
         data, current_margin = trade_data(table, status)
 
-        if i % 5 == 0 or i == 2:
+        if i % 3 == 0 or i == 2:
             total_value = (table['btc']['_total'] *
                            BTC_REF) + \
                            table['jpy']['_total']
@@ -266,32 +260,33 @@ def main():
             with open('last_table.json', 'w') as outfile:
                 json.dump(table, outfile)
 
-        #d.append(data)
-        #if i > 30:
-        #    d.pop(0)
-        #df = pd.DataFrame(data=d)
-        #rows = -30
-        #ax.clear()
-        #e_color = 0
+        if plot:
+            d.append(data)
+            if i > 30:
+                d.pop(0)
+            df = pd.DataFrame(data=d)
+            rows = -30
+            ax.clear()
+            e_color = 0
 
-        #for e in EXCHANGES:
-        #    ax.plot(df.index[rows:], df[e+'_ask'][rows:],
-        #            label=e+'_ask', color=COLORS[e_color])
-        #    ax.plot(df.index[rows:], df[e+'_bid'][rows:],
-        #            label=e+'_bid', linestyle='dashed', color=COLORS[e_color])
-        #    e_color += 1
-        #ax.legend()
-        #fig.canvas.draw()
-        #fig.canvas.flush_events()
+            for e in EXCHANGES:
+                ax.plot(df.index[rows:], df[e+'_ask'][rows:],
+                        label=e+'_ask', color=COLORS[e_color])
+                ax.plot(df.index[rows:], df[e+'_bid'][rows:],
+                        label=e+'_bid', linestyle='dashed', color=COLORS[e_color])
+                e_color += 1
+            ax.legend()
+            fig.canvas.draw()
+            fig.canvas.flush_events()
         time.sleep(1.5)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        main(PLOT)
     except KeyboardInterrupt:
         print('exiting')
         quit()
     except Exception as e:
         time.sleep(10)
-        main()
+        main(PLOT)
