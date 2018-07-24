@@ -25,6 +25,7 @@ LOW_MARGIN = 0.000
 MIN_MARGIN = -(MARGIN * 0.6)
 LOW_RATIO = 4 # when are funds considered low
 STABLE_VOL = '0.0' # should not start with (using slice for perf)
+STABLE_VOL_FLOAT = 0.09
 COLORS = ['blue', 'green', 'red', 'orange']
 BTC_REF = 905000  # to filter out market fluctuation
 
@@ -83,9 +84,9 @@ def bf_price():
 def zf_price():
     res = zf_client.depth('btc_jpy')
     for ask, askv in res['asks']:
-        if askv[:3] != STABLE_VOL:
+        if askv > STABLE_VOL_FLOAT:
             for bid, bidv in res['bids']:
-                if bidv[:3] != STABLE_VOL:
+                if bidv > STABLE_VOL_FLOAT:
                     return int(ask), int(bid)
 
 
