@@ -24,7 +24,7 @@ MARGIN = 0.0007
 LOW_MARGIN = 0.000
 MIN_MARGIN = -(MARGIN * 0.6)
 LOW_RATIO = 4 # when are funds considered low
-STABLE_VOL = 0.05 # when is volume considered stable
+STABLE_VOL = '0.0' # should not start with (using slice for perf)
 COLORS = ['blue', 'green', 'red', 'orange']
 BTC_REF = 905000  # to filter out market fluctuation
 
@@ -68,12 +68,10 @@ def zf_trade(direction, price, size=SIZE):
 def bb_price():
     res = bb_client.get_depth('btc_jpy')
     for ask, askv in res['asks']:
-        if float(askv) > STABLE_VOL:
-            break
-    for bid, bidv in res['bids']:
-        if float(bidv) > STABLE_VOL:
-            break
-    return int(ask), int(bid)
+        if askv[:3] != STABLE_VOL:
+            for bid, bidv in res['bids']:
+                if bidv[:3] != STABLE_VOL:
+                    return int(ask), int(bid)
 
 
 def bf_price():
@@ -85,12 +83,10 @@ def bf_price():
 def zf_price():
     res = zf_client.depth('btc_jpy')
     for ask, askv in res['asks']:
-        if float(askv) > STABLE_VOL:
-            break
-    for bid, bidv in res['bids']:
-        if float(bidv) > STABLE_VOL:
-            break
-    return int(ask), int(bid)
+        if askv[:3] != STABLE_VOL:
+            for bid, bidv in res['bids']:
+                if bidv[:3] != STABLE_VOL:
+                    return int(ask), int(bid)
 
 
 def bb_portfolio():
