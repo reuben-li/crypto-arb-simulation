@@ -10,6 +10,7 @@ import gevent
 import datetime
 import logging
 import os
+# import matplotlib.pyplot as plt
 
 logging.basicConfig(filename='trade.log', level=logging.INFO)
 
@@ -20,11 +21,11 @@ JPY_MIN = 1000
 BTC_MIN = 0.0021
 BF_FEES = 0.0015
 SIZE = 0.001
-MARGIN = 0.0007
-LOW_MARGIN = 0.000
-MIN_MARGIN = -(MARGIN * 0.6)
-LOW_RATIO = 4 # when are funds considered low
-STABLE_VOL = '0.0' # should not start with (using slice for perf)
+MARGIN = 600  # JPY per BTC
+LOW_MARGIN = 0
+MIN_MARGIN = -300
+LOW_RATIO = 4  # when are funds considered low
+STABLE_VOL = '0.0'  # should not start with (using slice for perf)
 STABLE_VOL_FLOAT = 0.09
 COLORS = ['blue', 'green', 'red', 'orange']
 BTC_REF = 905000  # to filter out market fluctuation
@@ -162,8 +163,8 @@ def trade_data(table, status):
 
     for e in EXCHANGES:
         ask, bid = globals()[e + '_price']()
-        margin_a = (max_bid - ask) / max_bid
-        margin_b = (bid - min_ask) / bid
+        margin_a = max_bid - ask
+        margin_b = bid - min_ask
 
         if margin_a > MARGIN:
             if status[e]['buy'] > 0 and status[bid_e]['sell'] > 0:
@@ -217,8 +218,6 @@ def main(plot):
                            BTC_REF) + \
                            table['jpy']['_total']
             table['total_value'] = total_value
-            total_diff = total_value - old_total
-            old_total = total_value
             os.system('cls||clear')
             print('-------')
             print('PORTFOLIO')
@@ -270,7 +269,8 @@ def main(plot):
                 ax.plot(df.index[rows:], df[e+'_ask'][rows:],
                         label=e+'_ask', color=COLORS[e_color])
                 ax.plot(df.index[rows:], df[e+'_bid'][rows:],
-                        label=e+'_bid', linestyle='dashed', color=COLORS[e_color])
+                        label=e+'_bid', linestyle='dashed',
+                        color=COLORS[e_color])
                 e_color += 1
             ax.legend()
             fig.canvas.draw()
