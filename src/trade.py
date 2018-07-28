@@ -1,5 +1,6 @@
 from zaifapi import *
 from pprint import pprint
+from quoine.client import Quoinex
 import time
 import pandas as pd
 import json
@@ -16,16 +17,16 @@ logging.basicConfig(filename='trade.log', level=logging.INFO)
 
 # globals
 PLOT = False
-EXCHANGES = ['bb', 'zf']
-JPY_MIN = 1000
-BTC_MIN = 0.0021
+EXCHANGES = ['bb', 'qn']
+JPY_MIN = 4000
+BTC_MIN = 0.0041
 BF_FEES = 0.0015
-SIZE = 0.001
-MARGIN = 600  # JPY per BTC
-LOW_MARGIN = 0
-MIN_MARGIN = -300
-LOW_RATIO = 4  # when are funds considered low
-STABLE_VOL = '0.0'  # should not start with (using slice for perf)
+SIZE = 0.002
+MARGIN = 800  # JPY per BTC
+LOW_MARGIN = 200
+MIN_MARGIN = 0
+LOW_RATIO = 3  # when are funds considered low
+STABLE_VOL = '0.00'  # should not start with (using slice for perf)
 STABLE_VOL_FLOAT = 0.09
 COLORS = ['blue', 'green', 'red', 'orange']
 BTC_REF = 905000  # to filter out market fluctuation
@@ -44,6 +45,7 @@ bb_client = python_bitbankcc.public()
 zf_pclient = ZaifTradeApi(
     auth['zf']['key'], auth['zf']['secret'])
 zf_client = ZaifPublicApi()
+qn_client = Quoinex(auth['qn']['key'], auth['qn']['secret'])
 
 
 def bb_trade(direction, price, size=SIZE):
@@ -59,6 +61,20 @@ def bf_trade(direction, price, size=SIZE):
     )
 
 
+def qn_trade(direction, price, size=SIZE):
+    """Trade with quoinex client"""
+    if direction == 'BUY':
+        qn_client.create_market_buy(
+            product_id=5,
+            quantity=size
+        )
+    else:
+        qn_client.create_market_sell(
+            product_id=5,
+            quantity=size
+        )
+
+
 def zf_trade(direction, price, size=SIZE):
     action = 'bid' if direction == 'BUY' else 'ask'
     zf_pclient.trade(
@@ -70,9 +86,9 @@ def zf_trade(direction, price, size=SIZE):
 def bb_price():
     res = bb_client.get_depth('btc_jpy')
     for ask, askv in res['asks']:
-        if askv[:3] != STABLE_VOL:
+        if askv[:4] != STABLE_VOL:
             for bid, bidv in res['bids']:
-                if bidv[:3] != STABLE_VOL:
+                if bidv[:4] != STABLE_VOL:
                     return int(ask), int(bid)
 
 
@@ -80,6 +96,15 @@ def bf_price():
     res = bf_client.ticker(product_code='BTC_JPY')
     return float(res['best_ask']*(1 + BF_FEES)), \
         float(res['best_bid']*(1 - BF_FEES))
+
+
+def qn_price():
+    res = qn_client.get_order_book(5, full=False)
+    for ask, askv in res['sell_price_levels']:
+        if askv[:4] != STABLE_VOL:
+            for bid, bidv in res['buy_price_levels']:
+                if bidv[:4] != STABLE_VOL:
+                    return float(ask), float(bid)
 
 
 def zf_price():
@@ -108,6 +133,15 @@ def bf_portfolio():
         elif res['currency_code'] == 'BTC':
             bf_btc = res['amount']
     return bf_jpy, bf_btc
+
+
+def qn_portfolio():
+    for i in qn_client.get_account_balances():
+        if i['currency'] == 'JPY':
+            qn_jpy = float(i['balance'])
+        elif i ['currency'] == 'BTC':
+            qn_btc = float(i['balance'])
+    return qn_jpy, qn_btc
 
 
 def zf_portfolio():
@@ -191,7 +225,7 @@ def trade_data(table, status):
         data[e + '_ask'] = ask
         data[e + '_bid'] = bid
 
-    return data, (max_bid - min_ask) / max_bid
+    return data, (max_bid - min_ask)
 
 
 def main(plot):
@@ -206,9 +240,10 @@ def main(plot):
     i = 0
     with open('last_table.json') as data_file:
         old_table = json.load(data_file)
-        start = time.time()
+    start = time.time()
 
     while True:
+        internal = time.time()
         i += 1
         table, status = portfolio_value()
         data, current_margin = trade_data(table, status)
@@ -247,11 +282,13 @@ def main(plot):
             print('STATUS')
             print('-------')
             pprint(status)
+            pprint(data)
             print('current margin: ', round(current_margin, 5))
             print('-------')
-            print('ELAPSED TIME (mins)')
+            print('TIME')
             print('-------')
-            print(round((time.time() - start)/60, 1))
+            print('Elapsed:', round((time.time() - start)/60, 1))
+            print('Loop time:', round((time.time() - internal), 4))
 
             with open('last_table.json', 'w') as outfile:
                 json.dump(table, outfile)
@@ -275,7 +312,7 @@ def main(plot):
             ax.legend()
             fig.canvas.draw()
             fig.canvas.flush_events()
-        time.sleep(1.5)
+        time.sleep(2)
 
 
 if __name__ == "__main__":
