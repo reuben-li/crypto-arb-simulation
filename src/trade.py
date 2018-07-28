@@ -18,18 +18,18 @@ logging.basicConfig(filename='trade.log', level=logging.INFO)
 # globals
 PLOT = False
 EXCHANGES = ['bb', 'qn']
-JPY_MIN = 4000
-BTC_MIN = 0.0041
 BF_FEES = 0.0015
+BTC_REF = 905000  # to filter out market fluctuation
 SIZE = 0.002
+JPY_MIN = SIZE * BTC_REF * 2.1
+BTC_MIN = SIZE * 2.1
 MARGIN = 800  # JPY per BTC
 LOW_MARGIN = 200
 MIN_MARGIN = 0
 LOW_RATIO = 3  # when are funds considered low
-STABLE_VOL = '0.00'  # should not start with (using slice for perf)
-STABLE_VOL_FLOAT = 0.09
+# STABLE_VOL = '0.00'  # should not start with (using slice for perf)
+STABLE_VOL_FLOAT = 0.
 COLORS = ['blue', 'green', 'red', 'orange']
-BTC_REF = 905000  # to filter out market fluctuation
 
 # import credentials
 with open('config.yml', 'r') as ymlfile:
@@ -86,9 +86,9 @@ def zf_trade(direction, price, size=SIZE):
 def bb_price():
     res = bb_client.get_depth('btc_jpy')
     for ask, askv in res['asks']:
-        if askv[:4] != STABLE_VOL:
+        if float(askv) > STABLE_VOL_FLOAT:
             for bid, bidv in res['bids']:
-                if bidv[:4] != STABLE_VOL:
+                if float(bidv) > STABLE_VOL_FLOAT:
                     return int(ask), int(bid)
 
 
@@ -99,11 +99,11 @@ def bf_price():
 
 
 def qn_price():
-    res = qn_client.get_order_book(5, full=False)
+    res = qn_client.get_order_book(5, full=True)
     for ask, askv in res['sell_price_levels']:
-        if askv[:4] != STABLE_VOL:
+        if float(askv) > STABLE_VOL_FLOAT:
             for bid, bidv in res['buy_price_levels']:
-                if bidv[:4] != STABLE_VOL:
+                if float(bidv) > STABLE_VOL_FLOAT:
                     return float(ask), float(bid)
 
 
@@ -139,7 +139,7 @@ def qn_portfolio():
     for i in qn_client.get_account_balances():
         if i['currency'] == 'JPY':
             qn_jpy = float(i['balance'])
-        elif i ['currency'] == 'BTC':
+        elif i['currency'] == 'BTC':
             qn_btc = float(i['balance'])
     return qn_jpy, qn_btc
 
