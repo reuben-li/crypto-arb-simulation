@@ -7,7 +7,7 @@ import json
 import pybitflyer
 import python_bitbankcc
 import yaml
-import gevent
+import threading
 import datetime
 import logging
 import os
@@ -28,7 +28,7 @@ LOW_MARGIN = 200
 MIN_MARGIN = 0
 LOW_RATIO = 3  # when are funds considered low
 # STABLE_VOL = '0.00'  # should not start with (using slice for perf)
-STABLE_VOL_FLOAT = 0.
+STABLE_VOL_FLOAT = 0.1
 COLORS = ['blue', 'green', 'red', 'orange']
 
 # import credentials
@@ -185,11 +185,14 @@ def trade_data(table, status):
     bid_e = ''
 
     def simul_orders(bx, sx, bprice, sprice, level):
-        orders = [
-            gevent.spawn(globals()[bx + '_trade'], 'BUY', bprice),
-            gevent.spawn(globals()[sx + '_trade'], 'SELL', sprice)
-        ]
-        gevent.joinall(orders)
+        t1 = threading.Thread(
+            target=globals()[bx + '_trade'], args=('BUY', bprice))
+        t2 = threading.Thread(
+            target=globals()[sx + '_trade'], args=('SELL', sprice))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
         logging.info(
             str(datetime.datetime.now()) + ' buy(' + str(level) + ') ' +
             bx + ':' + str(bprice) + ' sell ' + sx + ':' + str(sprice)
