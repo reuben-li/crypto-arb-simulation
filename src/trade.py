@@ -12,19 +12,20 @@ from datetime import datetime, timedelta
 import logging
 import os
 import queue
+import tailer
 # import matplotlib.pyplot as plt
 
-logging.basicConfig(filename='trade.log', level=logging.INFO)
+logging.basicConfig(filename='trade.log', level=logging.WARNING)
 
 # globals
 PLOT = False
 EXCHANGES = ['bb', 'qn']
 BF_FEES = 0.0015
 BTC_REF = 905000  # to filter out market fluctuation
-SIZE = 0.002
-BTC_MIN = SIZE * 2.1
+SIZE = 0.003
+BTC_MIN = SIZE * (len(EXCHANGES) + 0.2)
 JPY_MIN = BTC_MIN * BTC_REF
-MARGIN = 800  # JPY per BTC
+MARGIN = 400  # JPY per BTC
 LOW_MARGIN = 200
 MIN_MARGIN = 0
 LOW_RATIO = 3  # when are funds considered low
@@ -78,7 +79,7 @@ def zf_trade(direction, price, size=SIZE):
     action = 'bid' if direction == 'BUY' else 'ask'
     zf_pclient.trade(
         currency_pair='btc_jpy', action=action,
-        amount=size, price=price
+        amount=size, price=int(price)
     )
 
 
@@ -202,10 +203,12 @@ def dynamic_margins(margin, ask_e, ask, bid_e, bid, status):
         if status[ask_e]['buy'] > 0 and status[bid_e]['sell'] > 0:
             simul_orders(ask_e, bid_e, ask, bid, 2)
     elif margin > LOW_MARGIN:
-        if status[ask_e]['sell'] < 2 or status[bid_e]['buy'] < 2:
+        if (status[ask_e]['sell'] < 2 and status[bid_e]['buy'] > 0) or \
+                (status[bid_e]['buy'] < 2 and status[bid_e]['sell'] > 0):
             simul_orders(ask_e, bid_e, ask, bid, 1)
     elif margin > MIN_MARGIN:
-        if status[ask_e]['sell'] == 0 or status[bid_e]['buy'] == 0:
+        if (status[ask_e]['sell'] == 0 and status[bid_e]['buy'] > 0) or \
+                (status[bid_e]['buy'] == 0 and status[ask_e]['sell'] > 0):
             simul_orders(ask_e, bid_e, ask, bid, 0)
 
 
@@ -245,7 +248,7 @@ def simul_orders(bx, sx, bprice, sprice, level):
     t2.start()
     t1.join()
     t2.join()
-    logging.info(
+    logging.warning(
         str(datetime.now() + timedelta(hours=9)) +
         ' buy(' + str(level) + ') ' + bx + ':' +
         str(bprice) + ' sell ' + sx + ':' + str(sprice)
@@ -270,7 +273,7 @@ def trade_data(table, status):
     [t.join() for t in threads]
 
     data = {}
-    [data.update(q.get()) for i in range(len(EXCHANGES))]
+    [data.update(q.get()) for i in range(len(EXCHANGES)*2)]
 
     ask_e, min_ask = mna.get()
     bid_e, max_bid = mxb.get()
@@ -329,11 +332,18 @@ def main(plot):
             print('net growth(%)', round(growth_per * 100, 3))
             print('net growth(JPY)', round(growth, 3))
             print('-------')
-            print('STATUS')
+            print('TRADE STATUS')
             print('-------')
             pprint(status)
-            pprint(data)
-            print('current margin: ', round(current_margin, 5))
+            d = sorted(data.items(), key=lambda kv: kv[1], reverse=True)
+            for k, v in d:
+                print(k, v)
+            print('best margin: ', round(current_margin, 5))
+            print('-------')
+            print('RECENT TRADES')
+            print('-------')
+            for line in tailer.tail(open('trade.log'), 6):
+                print(line.replace('WARNING:root:', ''))
             print('-------')
             print('TIME')
             print('-------')
