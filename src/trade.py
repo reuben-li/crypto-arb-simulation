@@ -8,7 +8,7 @@ import pybitflyer
 import python_bitbankcc
 import yaml
 import threading
-import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 # import matplotlib.pyplot as plt
@@ -62,7 +62,6 @@ def bf_trade(direction, price, size=SIZE):
 
 
 def qn_trade(direction, price, size=SIZE):
-    """Trade with quoinex client"""
     if direction == 'BUY':
         qn_client.create_market_buy(
             product_id=5,
@@ -81,6 +80,17 @@ def zf_trade(direction, price, size=SIZE):
         currency_pair='btc_jpy', action=action,
         amount=size, price=price
     )
+
+
+def trade(ex, direction, price, size=SIZE):
+    if ex == 'zf':
+        zf_trade(direction, price, size=SIZE)
+    elif ex == 'bb':
+        bb_trade(direction, price, size=SIZE)
+    elif ex == 'qn':
+        qn_trade(direction, price, size=SIZE)
+    elif ex == 'bf':
+        bf_trade(direction, price, size=SIZE)
 
 
 def bb_price():
@@ -116,6 +126,17 @@ def zf_price():
                     return int(ask), int(bid)
 
 
+def price(ex):
+    if ex == 'zf':
+        return zf_price()
+    elif ex == 'bb':
+        return bb_price()
+    elif ex == 'qn':
+        return qn_price()
+    elif ex == 'bf':
+        return bf_price()
+
+
 def bb_portfolio():
     assets = bb_client_pte.get_asset()['assets']
     for a in assets:
@@ -149,6 +170,17 @@ def zf_portfolio():
     return res['funds']['jpy'], res['funds']['btc']
 
 
+def portfolio(ex):
+    if ex == 'zf':
+        return zf_portfolio()
+    elif ex == 'bb':
+        return bb_portfolio()
+    elif ex == 'qn':
+        return qn_portfolio()
+    elif ex == 'bf':
+        return bf_portfolio()
+
+
 def portfolio_value():
     table = {}
     table['jpy'] = {}
@@ -157,7 +189,7 @@ def portfolio_value():
 
     for e in EXCHANGES:
         status[e] = {'buy': 2, 'sell': 2}
-        jpy, btc = globals()[e + '_portfolio']()
+        jpy, btc = portfolio(e)
 
         if jpy < JPY_MIN:
             status[e]['buy'] = 0
@@ -186,20 +218,20 @@ def trade_data(table, status):
 
     def simul_orders(bx, sx, bprice, sprice, level):
         t1 = threading.Thread(
-            target=globals()[bx + '_trade'], args=('BUY', bprice))
+            target=trade, args=(bx, 'BUY', bprice))
         t2 = threading.Thread(
-            target=globals()[sx + '_trade'], args=('SELL', sprice))
+            target=trade, args=(sx, 'SELL', sprice))
         t1.start()
         t2.start()
         t1.join()
         t2.join()
         logging.info(
-            str(datetime.datetime.now()) + ' buy(' + str(level) + ') ' +
+            str(datetime.now() + timedelta(hours=9)) + ' buy(' + str(level) + ') ' +
             bx + ':' + str(bprice) + ' sell ' + sx + ':' + str(sprice)
         )
 
     for e in EXCHANGES:
-        ask, bid = globals()[e + '_price']()
+        ask, bid = price(e) 
         margin_a = max_bid - ask
         margin_b = bid - min_ask
 
