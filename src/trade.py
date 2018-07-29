@@ -11,6 +11,7 @@ import threading
 from datetime import datetime, timedelta
 import logging
 import os
+import queue
 # import matplotlib.pyplot as plt
 
 logging.basicConfig(filename='trade.log', level=logging.INFO)
@@ -21,13 +22,12 @@ EXCHANGES = ['bb', 'qn']
 BF_FEES = 0.0015
 BTC_REF = 905000  # to filter out market fluctuation
 SIZE = 0.002
-JPY_MIN = SIZE * BTC_REF * 2.1
 BTC_MIN = SIZE * 2.1
+JPY_MIN = BTC_MIN * BTC_REF
 MARGIN = 800  # JPY per BTC
 LOW_MARGIN = 200
 MIN_MARGIN = 0
 LOW_RATIO = 3  # when are funds considered low
-# STABLE_VOL = '0.00'  # should not start with (using slice for perf)
 STABLE_VOL_FLOAT = 0.1
 COLORS = ['blue', 'green', 'red', 'orange']
 
@@ -93,48 +93,31 @@ def trade(ex, direction, price, size=SIZE):
         bf_trade(direction, price, size=SIZE)
 
 
-def bb_price():
+def bb_price(q, mxb, mna, status):
     res = bb_client.get_depth('btc_jpy')
-    for ask, askv in res['asks']:
-        if float(askv) > STABLE_VOL_FLOAT:
-            for bid, bidv in res['bids']:
-                if float(bidv) > STABLE_VOL_FLOAT:
-                    return int(ask), int(bid)
+    price_decision(q, res, 'asks', 'bids', mna, mxb, 'bb', status)
 
 
-def bf_price():
-    res = bf_client.ticker(product_code='BTC_JPY')
-    return float(res['best_ask']*(1 + BF_FEES)), \
-        float(res['best_bid']*(1 - BF_FEES))
-
-
-def qn_price():
+def qn_price(q, mxb, mna, status):
     res = qn_client.get_order_book(5, full=True)
-    for ask, askv in res['sell_price_levels']:
-        if float(askv) > STABLE_VOL_FLOAT:
-            for bid, bidv in res['buy_price_levels']:
-                if float(bidv) > STABLE_VOL_FLOAT:
-                    return float(ask), float(bid)
+    price_decision(q, res, 'sell_price_levels',
+                   'buy_price_levels', mna, mxb, 'qn', status)
 
 
-def zf_price():
+def zf_price(q, mxb, mna, status):
     res = zf_client.depth('btc_jpy')
-    for ask, askv in res['asks']:
-        if askv > STABLE_VOL_FLOAT:
-            for bid, bidv in res['bids']:
-                if bidv > STABLE_VOL_FLOAT:
-                    return int(ask), int(bid)
+    price_decision(q, res, 'asks', 'bids', mna, mxb, 'zf', status)
 
 
-def price(ex):
+def price(ex, q, mxb, mna, status):
     if ex == 'zf':
-        return zf_price()
+        return zf_price(q, mxb, mna, status)
     elif ex == 'bb':
-        return bb_price()
+        return bb_price(q, mxb, mna, status)
     elif ex == 'qn':
-        return qn_price()
-    elif ex == 'bf':
-        return bf_price()
+        return qn_price(q, mxb, mna, status)
+    # elif ex == 'bf':
+    #     return bf_price(q, mxb, mna, status)
 
 
 def bb_portfolio():
@@ -157,12 +140,17 @@ def bf_portfolio():
 
 
 def qn_portfolio():
-    for i in qn_client.get_account_balances():
-        if i['currency'] == 'JPY':
-            qn_jpy = float(i['balance'])
-        elif i['currency'] == 'BTC':
-            qn_btc = float(i['balance'])
-    return qn_jpy, qn_btc
+    try:
+        for i in qn_client.get_account_balances():
+            if i['currency'] == 'JPY':
+                qn_jpy = float(i['balance'])
+            elif i['currency'] == 'BTC':
+                qn_btc = float(i['balance'])
+        return qn_jpy, qn_btc
+    except Exception as e:
+        print('cannot get qn assets')
+        time.sleep(5)
+        return qn_portfolio()
 
 
 def zf_portfolio():
@@ -209,56 +197,83 @@ def portfolio_value():
     return table, status
 
 
+def dynamic_margins(margin, ask_e, ask, bid_e, bid, status):
+    if margin > MARGIN:
+        if status[ask_e]['buy'] > 0 and status[bid_e]['sell'] > 0:
+            simul_orders(ask_e, bid_e, ask, bid, 2)
+    elif margin > LOW_MARGIN:
+        if status[ask_e]['sell'] < 2 or status[bid_e]['buy'] < 2:
+            simul_orders(ask_e, bid_e, ask, bid, 1)
+    elif margin > MIN_MARGIN:
+        if status[ask_e]['sell'] == 0 or status[bid_e]['buy'] == 0:
+            simul_orders(ask_e, bid_e, ask, bid, 0)
+
+
+def price_decision(q, res, ask_key, bid_key, mna, mxb, ex, status):
+    for ask, askv in res[ask_key]:
+        if float(askv) > STABLE_VOL_FLOAT:
+            ask_e, min_ask = mna.get()
+            bid_e, max_bid = mxb.get()
+            ask = float(ask)
+            if ask < min_ask:
+                mna.put((ex, ask))
+            else:
+                mna.put((ask_e, min_ask))
+            margin_a = max_bid - ask
+            dynamic_margins(margin_a, ex, ask, bid_e, max_bid, status)
+            for bid, bidv in res[bid_key]:
+                if float(bidv) > STABLE_VOL_FLOAT:
+                    bid = float(bid)
+                    if bid > max_bid:
+                        mxb.put((ex, bid))
+                    else:
+                        mxb.put((bid_e, max_bid))
+                    margin_b = bid - min_ask
+                    dynamic_margins(margin_b, ask_e,
+                                    min_ask, ex, bid, status)
+                    q.put({ex + '_ask': ask})
+                    q.put({ex + '_bid': bid})
+                    return
+
+
+def simul_orders(bx, sx, bprice, sprice, level):
+    t1 = threading.Thread(
+        target=trade, args=(bx, 'BUY', bprice))
+    t2 = threading.Thread(
+        target=trade, args=(sx, 'SELL', sprice))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    logging.info(
+        str(datetime.now() + timedelta(hours=9)) +
+        ' buy(' + str(level) + ') ' + bx + ':' +
+        str(bprice) + ' sell ' + sx + ':' + str(sprice)
+    )
+
+
 def trade_data(table, status):
-    data = {}
-    min_ask = 2000000
-    max_bid = 1
-    ask_e = ''
-    bid_e = ''
+    mxb = queue.Queue()
+    mxb.put(('xx', 1))
+    mna = queue.Queue()
+    mna.put(('xx', 5000000))
+    q = queue.Queue()
 
-    def simul_orders(bx, sx, bprice, sprice, level):
-        t1 = threading.Thread(
-            target=trade, args=(bx, 'BUY', bprice))
-        t2 = threading.Thread(
-            target=trade, args=(sx, 'SELL', sprice))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        logging.info(
-            str(datetime.now() + timedelta(hours=9)) + ' buy(' + str(level) + ') ' +
-            bx + ':' + str(bprice) + ' sell ' + sx + ':' + str(sprice)
-        )
-
+    threads = []
     for e in EXCHANGES:
-        ask, bid = price(e) 
-        margin_a = max_bid - ask
-        margin_b = bid - min_ask
+        threads.append(
+            threading.Thread(
+                target=price, args=(e, q, mxb, mna, status)
+            )
+        )
+    [t.start() for t in threads]
+    [t.join() for t in threads]
 
-        if margin_a > MARGIN:
-            if status[e]['buy'] > 0 and status[bid_e]['sell'] > 0:
-                simul_orders(e, bid_e, ask, max_bid, 2)
-        elif margin_a > LOW_MARGIN:
-            if status[e]['sell'] < 2 or status[bid_e]['buy'] < 2:
-                simul_orders(e, bid_e, ask, max_bid, 1)
-        elif margin_a > MIN_MARGIN:
-            if status[e]['sell'] == 0 or status[bid_e]['buy'] == 0:
-                simul_orders(e, bid_e, ask, max_bid, 0)
+    data = {}
+    [data.update(q.get()) for i in range(len(EXCHANGES))]
 
-        if margin_b > MARGIN:
-            if status[ask_e]['buy'] > 0 and status[e]['sell'] > 0:
-                simul_orders(ask_e, e, min_ask, bid, 2)
-        elif margin_b > LOW_MARGIN:
-            if status[ask_e]['sell'] < 2 or status[e]['buy'] < 2:
-                simul_orders(ask_e, e, min_ask, bid, 1)
-        elif margin_b > MIN_MARGIN:
-            if status[ask_e]['sell'] == 0 or status[e]['buy'] == 0:
-                simul_orders(ask_e, e, min_ask, bid, 0)
-
-        min_ask, ask_e = (ask, e) if ask < min_ask else (min_ask, ask_e)
-        max_bid, bid_e = (bid, e) if bid > max_bid else (max_bid, bid_e)
-        data[e + '_ask'] = ask
-        data[e + '_bid'] = bid
+    ask_e, min_ask = mna.get()
+    bid_e, max_bid = mxb.get()
 
     return data, (max_bid - min_ask)
 
@@ -288,7 +303,7 @@ def main(plot):
                            BTC_REF) + \
                            table['jpy']['_total']
             table['total_value'] = total_value
-            os.system('cls||clear')
+            os.system('clear')
             print('-------')
             print('PORTFOLIO')
             print('-------')
@@ -322,8 +337,8 @@ def main(plot):
             print('-------')
             print('TIME')
             print('-------')
-            print('Elapsed:', round((time.time() - start)/60, 1))
-            print('Loop time:', round((time.time() - internal), 4))
+            print('Elapsed:', round((time.time() - start)/60, 1), 'mins')
+            print('Loop time:', round((time.time() - internal), 4), 's')
 
             with open('last_table.json', 'w') as outfile:
                 json.dump(table, outfile)
