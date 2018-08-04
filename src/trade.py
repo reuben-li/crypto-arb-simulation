@@ -21,14 +21,14 @@ logging.basicConfig(filename='trade.log', level=logging.WARNING)
 PLOT = False
 EXCHANGES = ['bb', 'qn']
 BF_FEES = 0.0015
-BTC_REF = 905000  # to filter out market fluctuation
+BTC_REF = 865000  # to filter out market fluctuation
 SIZE = 0.003
-BTC_MIN = SIZE * (len(EXCHANGES) + 0.2)
-JPY_MIN = BTC_MIN * BTC_REF
-MARGIN = 400  # JPY per BTC
+BTC_MIN = SIZE * 1.05
+JPY_MIN = SIZE * 1.1 * BTC_REF
+MARGIN = 500  # JPY per BTC
 LOW_MARGIN = 200
 MIN_MARGIN = 0
-LOW_RATIO = 3  # when are funds considered low
+LOW_RATIO = 2  # when are funds considered low
 STABLE_VOL_FLOAT = 0.1
 COLORS = ['blue', 'green', 'red', 'orange']
 
@@ -125,9 +125,9 @@ def bb_portfolio():
     assets = bb_client_pte.get_asset()['assets']
     for a in assets:
         if a['asset'] == 'jpy':
-            bb_jpy = float(a['onhand_amount'])
+            bb_jpy = float(a['free_amount'])
         elif a['asset'] == 'btc':
-            bb_btc = float(a['onhand_amount'])
+            bb_btc = float(a['free_amount'])
     return bb_jpy, bb_btc
 
 
