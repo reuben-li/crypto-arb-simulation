@@ -12,18 +12,13 @@ import tailer
 logging.basicConfig(filename='trade.log', level=logging.WARNING)
 
 # globals
-PLOT = False
-EXCHANGES = ['bb', 'qn']
-BF_FEES = 0.0015
-BTC_REF = 865000  # to filter out market fluctuation
 SIZE = 0.2
-BTC_MIN = SIZE * 1.05
-JPY_MIN = SIZE * 1.1 * BTC_REF
-MARGIN = 3000  # JPY per BTC
+MARGIN = 3000
 MIN_MARGIN = 1500
-LOW_RATIO = 2  # when are funds considered low
-STABLE_VOL_FLOAT = 0.1
-COLORS = ['blue', 'green', 'red', 'orange']
+STABLE_VOL_FLOAT = 0.5
+LEVERAGE = 5
+QN_MC = 0.15
+ZF_MC = 0.35
 
 # import credentials
 with open('config.yml', 'r') as ymlfile:
@@ -41,22 +36,24 @@ qn_client = Quoinex(auth['qn']['key'], auth['qn']['secret'])
 
 def qn_price():
     res = qn_client.get_order_book(5, full=True)
-    return stable_price(res, 'sell_price_levels', 'buy_price_levels')
+    ask, bid = stable_price(res, 'sell_price_levels', 'buy_price_levels')
+    return float(ask), float(bid)
 
 
 def zf_price():
     res = zf_client.depth('btc_jpy')
-    return stable_price(res, 'asks', 'bids')
+    ask, bid = stable_price(res, 'asks', 'bids')
+    return int(ask), int(bid)
 
 
 def stable_price(res, ask_key, bid_key):
     for ask, askv in res[ask_key]:
         if float(askv) > STABLE_VOL_FLOAT:
-            ask = float(ask)
+            ask = ask
             break
     for bid, bidv in res[bid_key]:
         if float(bidv) > STABLE_VOL_FLOAT:
-            bid = float(bid)
+            bid = bid
             return ask, bid
 
 
@@ -66,7 +63,9 @@ def portfolio_value():
     table['qn_balance'] = float(qn_res['equity'])
     table['qn_margin'] = float(qn_res['free_margin']) / table['qn_balance']
     try:
-        zf_used = next(iter(zf_pclient.active_positions(type='margin').items()))[1]['deposit_jpy']
+        key = 'deposit_jpy'
+        zf_used = next(iter(
+            zf_pclient.active_positions(type='margin').items()))[1][key]
     except Exception:
         zf_used = 0
     table['zf_balance'] = zf_iclient.get_info2()['funds']['jpy'] + zf_used
@@ -74,7 +73,7 @@ def portfolio_value():
     return table
 
 
-def open_qn(direction, price, size=SIZE, leverage=5):
+def open_qn(direction, price, size=SIZE, leverage=LEVERAGE):
     return qn_client.create_margin_order(
         order_type='market',
         product_id=5,
@@ -93,22 +92,21 @@ def close_qn():
         qn_client.close_trade(lev['id'])
 
 
-def open_zf(direction, price, size=SIZE, leverage=5):
+def open_zf(direction, price, size=SIZE, leverage=LEVERAGE):
     action = 'bid' if direction == 'BUY' else 'ask'
-    ask, bid = open_zf()
     zf_pclient.create_position(
         action=action,
         amount=size,
         leverage=leverage,
-        price=int(price),
+        price=price,
         type='margin',
         currency_pair='btc_jpy'
     )
 
 
 def close_zf():
-    ask, bid = zf_price()
     res = zf_pclient.active_positions(type='margin')
+    ask, bid = zf_price()
     for lev in res.items():
         if lev[1]['action'] == 'ask':
             limit = ask
@@ -117,45 +115,9 @@ def close_zf():
         zf_pclient.change_position(
             leverage_id=int(lev[0]),
             type='margin',
-            limit=int(limit),
+            limit=limit,
             price=int(lev[1]['price'])
         )
-
-
-def trade(ex, direction, price):
-    if ex == 'qn':
-        open_qn(direction, price)
-    else:
-        open_zf(direction, price)
-
-
-def simul_orders(bx, sx, bprice, sprice):
-    t1 = threading.Thread(
-        target=trade, args=(bx, 'BUY', bprice))
-    t2 = threading.Thread(
-        target=trade, args=(sx, 'SELL', sprice))
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    logging.warning(
-        str(datetime.now() + timedelta(hours=9)) +
-        ' buy ' + bx + ':' +
-        str(bprice) + ' sell ' + sx + ':' + str(sprice)
-    )
-
-
-def simul_close():
-    t1 = threading.Thread(target=close_qn, args=())
-    t2 = threading.Thread(target=close_zf, args=())
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    logging.warning(
-        str(datetime.now() + timedelta(hours=9)) +
-        ' CLOSED'
-    )
 
 
 def clear_trade():
@@ -170,9 +132,8 @@ def check_opp(trade_ok):
     za, zb = zf_price()
     if not ct['trade'] and trade_ok:
         if zb - qa > MARGIN:
-            # simul_orders('qn', 'zf', qa, zb)
             try:
-                open_zf('SELL', int(zb))
+                open_zf('SELL', zb)
                 open_qn('BUY', '')
                 logging.warning(
                     str(datetime.now() + timedelta(hours=9)) +
@@ -185,9 +146,8 @@ def check_opp(trade_ok):
                 print('trade failed')
                 pass
         elif qb - za > MARGIN:
-            # simul_orders('zf', 'qn', za, qb)
             try:
-                open_zf('BUY', int(za))
+                open_zf('BUY', za)
                 open_qn('SELL', '')
                 logging.warning(
                     str(datetime.now() + timedelta(hours=9)) +
@@ -247,7 +207,7 @@ def main():
         os.system('clear')
         i += 1
         table = portfolio_value()
-        if table['qn_margin'] > 0.15 and table['zf_margin'] > 0.35:
+        if table['qn_margin'] > QN_MC and table['zf_margin'] > ZF_MC:
             check_opp(True)
         else:
             check_opp(False)
@@ -282,4 +242,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        time.sleep(10)
+        main()
