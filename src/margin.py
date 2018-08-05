@@ -12,9 +12,9 @@ import tailer
 logging.basicConfig(filename='trade.log', level=logging.WARNING)
 
 # globals
-SIZE = 0.2
+SIZE = 0.18
 MARGIN = 3000
-PROFIT_THRESHOLD = 300 # in yen
+PROFIT_THRESHOLD = 200 # in yen
 STABLE_VOL_FLOAT = 0.5
 LEVERAGE = 5
 QN_MC = 0.15
@@ -115,10 +115,10 @@ def order_status_qn():
         order_id = res['models'][0]['id']
         pnl = res['models'][0]['open_pnl']
         margin_used = res['models'][0]['margin_used']
-    return order_id, pnl, margin_used
+    return order_id, float(pnl), margin_used
 
 
-def order_status_zf(ask, bid):
+def order_status_zf():
     order_id = ''
     pnl = 0
     margin_used = 0
@@ -131,11 +131,11 @@ def order_status_zf(ask, bid):
                 diff = lev[1]['price_avg'] - ask
             else:
                 diff = bid - lev[1]['price_avg']
-            pnl = diff * lev[1]['amount_done']
+            pnl = (diff * lev[1]['amount_done']) - lev[1]['fee_spent']
             margin_used = lev[1]['deposit_jpy']
             # taking only 1 item
             break
-    return order_id, pnl, margin_used
+    return order_id, float(pnl), margin_used
 
 
 def close_qn():
@@ -160,6 +160,12 @@ def close_zf():
         )
 
 
+def loglog(msg):
+    now = str(datetime.now().replace(
+        microsecond=0) + timedelta(hours=9))
+    logging.warning(now + ' ' + msg)
+
+
 def check_opp(trade_ok):
     qa, qb = qn_price()
     za, zb = zf_price()
@@ -169,26 +175,17 @@ def check_opp(trade_ok):
                 open_zf('SELL', zb)
                 open_qn('BUY', '')
                 print('traded')
-                logging.warning(
-                    str(datetime.now() + timedelta(hours=9)) +
-                    ' buy ' + 'qn' + ':' +
-                    str(qa) + ' sell ' + 'zf' + ':' + str(zb)
-                )
-            except Exception:
-                print('trade failed')
+                loglog('buy qn:' + str(qa) + ' sell zf:' + str(zb))
+            except Exception as e:
+                loglog('TRADE FAILED: ' + str(e))
                 pass
         elif qb - za > MARGIN:
             try:
                 open_zf('BUY', za)
                 open_qn('SELL', '')
-                print('traded')
-                logging.warning(
-                    str(datetime.now() + timedelta(hours=9)) +
-                    ' buy ' + 'zf' + ':' +
-                    str(za) + ' sell ' + 'qn' + ':' + str(qb)
-                )
-            except Exception:
-                print('trade failed')
+                loglog('buy zf:' + str(za) + ' sell qn:' + str(qb))
+            except Exception as e:
+                loglog('TRADE FAILED: ' + str(e))
                 pass
     else:
         qn_id, qn_pnl, qn_used = order_status_qn()
@@ -197,8 +194,9 @@ def check_opp(trade_ok):
             try:
                 close_zf()
                 close_qn()
-            except Exception:
-                print('close failed')
+                loglog('CLOSED')
+            except Exception as e:
+                loglog('CLOSE FAILED: ' + str(e))
                 pass
     data = {}
     data['zf_bid'] = zb
@@ -210,7 +208,7 @@ def check_opp(trade_ok):
 
 def main():
     max_zbqa = 0
-    min_zaqb = 9999999
+    min_zaqb = 99999
 
     while True:
         os.system('clear')
@@ -223,7 +221,12 @@ def main():
         current_zbqa = data['zf_bid'] - data['qn_ask']
         current_zaqb = data['zf_ask'] - data['qn_bid']
         max_zbqa = max(max_zbqa, current_zbqa)
-        min_zaqb = max(min_zaqb, current_zaqb)
+        min_zaqb = min(min_zaqb, current_zaqb)
+        if max_zbqa > min_zaqb:
+            global MARGIN
+            MARGIN = max_zbqa
+            max_zbqa = 0
+            min_zaqb = 99999
 
         qn_pnl = table['qn_pnl']
         zf_pnl = table['zf_pnl']
@@ -259,6 +262,8 @@ def main():
 
         print('max zbqa:', round(max_zbqa, 2))
         print('min zaqb:', round(min_zaqb, 2))
+        print('MARGIN:', MARGIN)
+        print('PROFIT_THRESHOLD:', PROFIT_THRESHOLD)
 
         print('-------')
         print('RECENT TRADES')
@@ -275,6 +280,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as e:
+        loglog('EXCEPTION: ' + str(e))
         time.sleep(10)
         main()
