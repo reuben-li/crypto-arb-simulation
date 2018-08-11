@@ -9,16 +9,17 @@ import tailer
 import json
 import pybitflyer
 import threading
+from queue import Queue
 from IPython.display import clear_output
 
 logging.basicConfig(filename='fx.log', level=logging.WARNING)
 
 # globals
-SIZE = 0.4
+SIZE = 0.3
 MARGIN = 16000
-MARGIN2 = -14000
+MARGIN2 = -1600
 PROFIT_THRESHOLD = int(sys.argv[1]) # in yen
-STABLE_VOL_FLOAT = 0.8
+STABLE_VOL_FLOAT = SIZE * 2 
 LEVERAGE = 10
 
 # import credentials
@@ -37,22 +38,23 @@ bf_client = pybitflyer.API(
 qn_client = Quoinex(auth['qn']['key'], auth['qn']['secret'])
 
 
-def qn_price():
+def qn_price(q):
     res = qn_client.get_order_book(5, full=True)
     ask, bid = stable_price(res, 'sell_price_levels', 'buy_price_levels')
-    return float(ask), float(bid)
+    q.put({'qn': (float(ask), float(bid))})
 
 
-def bf_price():
+def bf_price(q):
     res = bf_client.board(product_code='FX_BTC_JPY')
     for a in res['asks']:
         if a['size'] > STABLE_VOL_FLOAT:
             ask = a['price']
             break
     for b in res['bids']:
-        if a['size'] > STABLE_VOL_FLOAT:
+        if b['size'] > STABLE_VOL_FLOAT:
             bid = b['price']
-            return ask, bid
+            q.put({'bf': (ask, bid)})
+            break
 
 
 def stable_price(res, ask_key, bid_key):
@@ -64,6 +66,20 @@ def stable_price(res, ask_key, bid_key):
         if float(bidv) > STABLE_VOL_FLOAT:
             bid = bid
             return ask, bid
+
+
+def get_prices():
+    q = Queue()
+    t1 = threading.Thread(target=qn_price, args=([q]))
+    t2 = threading.Thread(target=bf_price, args=([q]))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    p = {}
+    for i in range(2):
+        p.update(q.get())
+    return p['qn'][0], p['qn'][1], p['bf'][0], p['bf'][1]
 
 
 def portfolio_value():
@@ -155,46 +171,39 @@ def get_last_profits():
     return round(q_profit, 2), b_profit
 
 
-def check_opp(trade_ok):
-    qa, qb = qn_price()
-    ba, bb = bf_price()
+def bf_wrapper(q2):
+    qn_pnl = order_status_qn()
+    q2.put(qn_pnl)
 
-    if trade_ok:
-        if bb - qa > MARGIN:
+
+def qn_wrapper(q2):
+    d, bf_pnl, bu = order_status_bf()
+    q2.put(bf_pnl)
+
+
+def check_opp(trade_ok):
+    if not trade_ok:
+        total_pnl = 0
+        q = Queue()
+        t1 = threading.Thread(target=qn_wrapper, args=([q]))
+        t2 = threading.Thread(target=bf_wrapper, args=([q]))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        for i in range(2):
+            total_pnl += q.get()
+
+        if total_pnl > PROFIT_THRESHOLD:
             try:
-                t1 = threading.Thread(target=open_bf, args=(['SELL']))
-                t2 = threading.Thread(target=open_qn, args=(['BUY']))
-                t1.start()
-                t2.start()
-                t1.join()
-                t2.join()
-                loglog('buy qn:' + str(qa) + ' sell bf:' + str(bb))
-            except Exception as e:
-                loglog('TRADE FAILED: ' + str(e))
-                pass
-        elif qb - ba > MARGIN2:
-            try:
-                t1 = threading.Thread(target=open_bf, args=(['BUY']))
-                t2 = threading.Thread(target=open_qn, args=(['SELL']))
-                t1.start()
-                t2.start()
-                t1.join()
-                t2.join()
-                loglog('buy bf:' + str(ba) + ' sell qn:' + str(qb))
-            except Exception as e:
-                loglog('TRADE FAILED: ' + str(e))
-                pass
-    else:
-        qn_pnl = order_status_qn()
-        deposit, bf_pnl, bf_used = order_status_bf()
-        if qn_pnl + bf_pnl > PROFIT_THRESHOLD:
-            try:
-                t1 = threading.Thread(target=close_bf, args=())
-                t2 = threading.Thread(target=close_qn, args=())
-                t1.start()
-                t2.start()
-                t1.join()
-                t2.join()
+                close_qn()
+                close_bf()
+                #t1 = threading.Thread(target=close_bf, args=())
+                #t2 = threading.Thread(target=close_qn, args=())
+                #t1.start()
+                #t2.start()
+                #t1.join()
+                #t2.join()
                 time.sleep(4)
                 qp, bp = get_last_profits()
                 loglog('CLOSED: ' + str(qp) + '(qn) ' + str(bp) +
@@ -202,6 +211,36 @@ def check_opp(trade_ok):
 
             except Exception as e:
                 loglog('CLOSE FAILED: ' + str(e))
+                pass
+    qa, qb, ba, bb = get_prices()
+    if trade_ok:
+        if bb - qa > MARGIN:
+            try:
+                open_qn('BUY')
+                open_bf('SELL')
+                #t1 = threading.Thread(target=open_bf, args=(['SELL']))
+                #t2 = threading.Thread(target=open_qn, args=(['BUY']))
+                #t1.start()
+                #t2.start()
+                #t1.join()
+                #t2.join()
+                loglog('buy qn:' + str(qa) + ' sell bf:' + str(bb))
+            except Exception as e:
+                loglog('TRADE FAILED: ' + str(e))
+                pass
+        elif qb - ba > MARGIN2:
+            try:
+                open_qn('SELL')
+                open_bf('BUY')
+                #t1 = threading.Thread(target=open_bf, args=(['BUY']))
+                #t2 = threading.Thread(target=open_qn, args=(['SELL']))
+                #t1.start()
+                #t2.start()
+                #t1.join()
+                #t2.join()
+                loglog('buy bf:' + str(ba) + ' sell qn:' + str(qb))
+            except Exception as e:
+                loglog('TRADE FAILED: ' + str(e))
                 pass
 
     data = {}
@@ -235,11 +274,11 @@ def main():
         max_baqb = max(max_baqb, -current_baqb)
         global MARGIN
         global MARGIN2
-        if max_bbqa > min_baqb and max_bbqa > 15000:
+        if max_bbqa > min_baqb and max_bbqa > MARGIN + 100:
             MARGIN = max_bbqa
             max_bbqa = -99999
             min_baqb = 99999
-        elif max_baqb > min_bbqa and max_baqb > -13000:
+        elif max_baqb > min_bbqa and max_baqb > MARGIN2 + 100:
             MARGIN2 = max_baqb
             min_bbqa = 99999
             max_baqb = -99999
@@ -276,7 +315,8 @@ def main():
                 print(k, v)
             oldv = v
         print('')
-        print('bbqa-baqb:', round(current_bbqa - current_baqb, 2))
+        print('max_bbqa-min_baqb:', round(max_bbqa - min_baqb, 2))
+        print('max_baqb-min_bbqa:', round(max_baqb - min_bbqa, 2))
         print('MARGIN:', MARGIN, '(' + str(round(current_bbqa, 2)) + ')')
         print('MARGIN2:', MARGIN2, '(' + str(round(-current_baqb, 2)) + ')')
 
@@ -291,7 +331,7 @@ def main():
         global FUNDS
         FUNDS = {'funds': total}
 
-        time.sleep(5)
+        time.sleep(3.5)
 
 
 if __name__ == "__main__":
@@ -303,5 +343,6 @@ if __name__ == "__main__":
                 json.dump(FUNDS, outfile)
                 sys.exit(1)
         except Exception as e:
+            e = 'connection issues' if 'Connection' in str(e) else e
             loglog('EXCEPTION: ' + str(e))
         time.sleep(10)
